@@ -16218,7 +16218,8 @@ mod tests {
         let mut form = ProviderAddFormState::new(AppType::Pi);
         form.id.set("test-pi".to_string());
         form.name.set("Test Pi".to_string());
-        form.opencode_base_url.set("https://example.com/v1".to_string());
+        form.opencode_base_url
+            .set("https://example.com/v1".to_string());
         form.opencode_api_key.set("test-key".to_string());
         app.form = Some(FormState::ProviderAdd(form));
 

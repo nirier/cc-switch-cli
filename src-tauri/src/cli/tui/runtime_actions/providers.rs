@@ -612,8 +612,11 @@ pub(super) fn discover_pi_models(
     ctx.app.overlay = Overlay::Loading {
         kind: LoadingKind::PiModelDiscovery(request_id),
         title: crate::t!("Discover models", "探测模型").to_string(),
-        message: crate::t!("Fetching the provider’s model list…", "正在获取供应商的模型列表…")
-            .to_string(),
+        message: crate::t!(
+            "Fetching the provider’s model list…",
+            "正在获取供应商的模型列表…"
+        )
+        .to_string(),
     };
     Ok(())
 }

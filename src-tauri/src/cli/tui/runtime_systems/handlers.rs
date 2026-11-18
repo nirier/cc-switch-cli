@@ -1351,7 +1351,10 @@ pub(crate) fn handle_skills_msg(
         SkillsMsg::InstallFinished { spec, result } => {
             if matches!(
                 app.overlay,
-                Overlay::Loading { kind: LoadingKind::Generic, .. }
+                Overlay::Loading {
+                    kind: LoadingKind::Generic,
+                    ..
+                }
             ) {
                 app.overlay = Overlay::None;
             }
@@ -2316,7 +2319,8 @@ mod tests {
         let mut app = App::new(Some(AppType::Pi));
         let mut form = ProviderAddFormState::new(AppType::Pi);
         form.name.set("Discovered provider".to_string());
-        form.opencode_base_url.set("https://example.com/v1".to_string());
+        form.opencode_base_url
+            .set("https://example.com/v1".to_string());
         form.opencode_api_key.set("test-key".to_string());
         app.form = Some(FormState::ProviderAdd(form));
         app.overlay = Overlay::Loading {
@@ -2328,7 +2332,10 @@ mod tests {
             request_id,
             result: Ok(crate::cli::pi_model_discovery::DiscoveredModels {
                 base_url: "https://example.com/v1".parse().unwrap(),
-                models: vec![serde_json::json!({ "id": "a" }), serde_json::json!({ "id": "b" })],
+                models: vec![
+                    serde_json::json!({ "id": "a" }),
+                    serde_json::json!({ "id": "b" }),
+                ],
             }),
         };
 

@@ -160,7 +160,9 @@ async fn read_models(mut response: reqwest::Response) -> Result<Vec<Value>, Stri
         .map_err(|error| error.without_url().to_string())?
     {
         if chunk.len() as u64 > MAX_PI_FILE_BYTES - body.len() as u64 {
-            return Err(crate::t!("Model response exceeds 1 MiB", "模型接口响应超过 1 MiB").to_string());
+            return Err(
+                crate::t!("Model response exceeds 1 MiB", "模型接口响应超过 1 MiB").to_string(),
+            );
         }
         body.extend_from_slice(&chunk);
     }

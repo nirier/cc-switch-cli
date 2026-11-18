@@ -405,7 +405,8 @@ fn write_models_document(
     let mut bytes =
         serde_json::to_vec_pretty(document).map_err(|source| AppError::JsonSerialize { source })?;
     if bytes.len() as u64 >= MAX_PI_FILE_BYTES {
-        bytes = serde_json::to_vec(document).map_err(|source| AppError::JsonSerialize { source })?;
+        bytes =
+            serde_json::to_vec(document).map_err(|source| AppError::JsonSerialize { source })?;
     }
     bytes.push(b'\n');
     if bytes.len() as u64 > MAX_PI_FILE_BYTES {
