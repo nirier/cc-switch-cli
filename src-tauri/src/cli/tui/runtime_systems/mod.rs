@@ -22,8 +22,8 @@ pub(crate) use types::{
 };
 pub(crate) use types::{
     next_model_fetch_request_id, AppDataLoadKind, AppDataMsg, AppDataReq, CodexHistoryReq,
-    LocalEnvReq, ManagedAuthReq, ModelFetchReq, ProxyReq, QuotaReq, RequestTracker, SessionReq,
-    SkillsReq, StreamCheckReq, UpdateReq, UsageLogLoadError, UsagePricingLoadError,
+    LocalEnvReq, ManagedAuthReq, ModelFetchMsg, ModelFetchReq, ProxyReq, QuotaReq, RequestTracker,
+    SessionReq, SkillsReq, StreamCheckReq, UpdateReq, UsageLogLoadError, UsagePricingLoadError,
     UsagePricingMsg, UsagePricingReq, WebDavReq, WebDavReqKind,
 };
 pub(crate) use types::{SessionUsageSyncMsg, SessionUsageSyncReq};

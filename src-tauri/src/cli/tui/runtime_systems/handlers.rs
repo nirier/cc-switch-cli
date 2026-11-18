@@ -7,10 +7,11 @@ use crate::settings::{
 };
 
 use super::super::app::{
-    model_fetch_filter, App, CloudSyncBackend, CloudSyncTransferIntent, ConfirmAction,
-    ConfirmOverlay, LoadingKind, Overlay, SessionsPane, ToastKind,
+    model_fetch_filter, Action, App, CloudSyncBackend, CloudSyncTransferIntent, ConfirmAction,
+    ConfirmOverlay, EditorSubmit, LoadingKind, Overlay, SessionsPane, ToastKind,
 };
 use super::super::data::{ProviderRuntimeSnapshot, UiData};
+use super::super::form::FormState;
 use super::super::runtime_actions::app_display_name;
 use super::super::CacheInvalidation;
 use super::types::{
@@ -1048,8 +1049,33 @@ pub(crate) fn handle_quota_msg(app: &mut App, data: &mut UiData, msg: QuotaMsg) 
     }
 }
 
-pub(crate) fn handle_model_fetch_msg(app: &mut App, msg: ModelFetchMsg) {
+pub(crate) fn handle_model_fetch_msg(app: &mut App, msg: ModelFetchMsg) -> Option<Action> {
     match msg {
+        ModelFetchMsg::PiDiscoveryFinished { request_id, result } => {
+            if !matches!(
+                app.overlay,
+                Overlay::Loading { kind: LoadingKind::PiModelDiscovery(id), .. } if id == request_id
+            ) {
+                return None;
+            }
+            app.close_overlay();
+            let discovered = match result {
+                Ok(discovered) => discovered,
+                Err(err) => {
+                    app.push_toast(texts::tui_model_fetch_error_hint(&err), ToastKind::Error);
+                    return None;
+                }
+            };
+            let Some(FormState::ProviderAdd(form)) = app.form.as_ref() else {
+                return None;
+            };
+            let mut payload = form.to_provider_json_value();
+            discovered.apply(&mut payload["settingsConfig"]);
+            return Some(Action::EditorSubmit {
+                submit: EditorSubmit::ProviderAdd,
+                content: payload.to_string(),
+            });
+        }
         ModelFetchMsg::Finished {
             request_id,
             field,
@@ -1071,7 +1097,7 @@ pub(crate) fn handle_model_fetch_msg(app: &mut App, msg: ModelFetchMsg) {
             } = app.overlay
             {
                 if current_request_id != request_id {
-                    return;
+                    return None;
                 }
                 if current_field == &field && current_claude_idx == &claude_idx {
                     *f = false;
@@ -1096,6 +1122,7 @@ pub(crate) fn handle_model_fetch_msg(app: &mut App, msg: ModelFetchMsg) {
             }
         }
     }
+    None
 }
 
 pub(crate) fn handle_managed_auth_msg(app: &mut App, msg: ManagedAuthMsg) {
@@ -1321,42 +1348,48 @@ pub(crate) fn handle_skills_msg(
                 );
             }
         },
-        SkillsMsg::InstallFinished { spec, result } => match result {
-            Ok(installed) => {
+        SkillsMsg::InstallFinished { spec, result } => {
+            if matches!(
+                app.overlay,
+                Overlay::Loading { kind: LoadingKind::Generic, .. }
+            ) {
                 app.overlay = Overlay::None;
-                *data = UiData::load(&app.app_type)?;
-                invalidation = CacheInvalidation::DataReloaded;
+            }
+            match result {
+                Ok(installed) => {
+                    *data = UiData::load(&app.app_type)?;
+                    invalidation = CacheInvalidation::DataReloaded;
 
-                for row in app.skills_discover_results.iter_mut() {
-                    if row.key == installed.id
-                        || row.directory.eq_ignore_ascii_case(&installed.directory)
-                    {
-                        row.installed = true;
-                    }
-                }
-                for rows in app.skills_discover_cache.values_mut() {
-                    for row in rows.iter_mut() {
+                    for row in app.skills_discover_results.iter_mut() {
                         if row.key == installed.id
                             || row.directory.eq_ignore_ascii_case(&installed.directory)
                         {
                             row.installed = true;
                         }
                     }
-                }
+                    for rows in app.skills_discover_cache.values_mut() {
+                        for row in rows.iter_mut() {
+                            if row.key == installed.id
+                                || row.directory.eq_ignore_ascii_case(&installed.directory)
+                            {
+                                row.installed = true;
+                            }
+                        }
+                    }
 
-                app.push_toast(
-                    texts::tui_toast_skill_installed(&installed.directory),
-                    ToastKind::Success,
-                );
+                    app.push_toast(
+                        texts::tui_toast_skill_installed(&installed.directory),
+                        ToastKind::Success,
+                    );
+                }
+                Err(err) => {
+                    app.push_toast(
+                        texts::tui_toast_skill_install_failed(&spec, &err),
+                        ToastKind::Error,
+                    );
+                }
             }
-            Err(err) => {
-                app.overlay = Overlay::None;
-                app.push_toast(
-                    texts::tui_toast_skill_install_failed(&spec, &err),
-                    ToastKind::Error,
-                );
-            }
-        },
+        }
         SkillsMsg::UpdatesChecked { result } => match result {
             Ok(result) => {
                 app.overlay = Overlay::None;
@@ -2004,7 +2037,7 @@ mod tests {
     use super::*;
     use crate::app_config::AppType;
     use crate::cli::tui::data::{ProviderUsageQuota, QuotaTarget, QuotaTargetKind};
-    use crate::cli::tui::form::ProviderAddField;
+    use crate::cli::tui::form::{ProviderAddField, ProviderAddFormState};
     use crate::cli::tui::route::Route;
     use crate::cli::tui::text_edit::TextInput;
     use crate::services::local_env_check::{LocalTool, ToolCheckResult, ToolCheckStatus};
@@ -2253,7 +2286,7 @@ mod tests {
             selection_active: false,
         };
 
-        handle_model_fetch_msg(
+        let action = handle_model_fetch_msg(
             &mut app,
             ModelFetchMsg::Finished {
                 request_id: 7,
@@ -2266,6 +2299,7 @@ mod tests {
                 ]),
             },
         );
+        assert!(action.is_none());
 
         assert!(matches!(
             app.overlay,
@@ -2275,6 +2309,52 @@ mod tests {
                 ..
             } if indices == &[1, 2]
         ));
+    }
+
+    #[test]
+    fn pi_model_discovery_submits_all_models_only_for_the_active_request() {
+        let mut app = App::new(Some(AppType::Pi));
+        let mut form = ProviderAddFormState::new(AppType::Pi);
+        form.name.set("Discovered provider".to_string());
+        form.opencode_base_url.set("https://example.com/v1".to_string());
+        form.opencode_api_key.set("test-key".to_string());
+        app.form = Some(FormState::ProviderAdd(form));
+        app.overlay = Overlay::Loading {
+            kind: LoadingKind::PiModelDiscovery(8),
+            title: String::new(),
+            message: String::new(),
+        };
+        let response = |request_id| ModelFetchMsg::PiDiscoveryFinished {
+            request_id,
+            result: Ok(crate::cli::pi_model_discovery::DiscoveredModels {
+                base_url: "https://example.com/v1".parse().unwrap(),
+                models: vec![serde_json::json!({ "id": "a" }), serde_json::json!({ "id": "b" })],
+            }),
+        };
+
+        handle_skills_msg(
+            &mut app,
+            &mut UiData::default(),
+            SkillsMsg::InstallFinished {
+                spec: "test-skill".to_string(),
+                result: Err("test error".to_string()),
+            },
+        )
+        .unwrap();
+        assert!(handle_model_fetch_msg(&mut app, response(7)).is_none());
+        let Some(Action::EditorSubmit {
+            submit: EditorSubmit::ProviderAdd,
+            content,
+        }) = handle_model_fetch_msg(&mut app, response(8))
+        else {
+            panic!("active discovery should submit the Pi provider");
+        };
+        let payload: serde_json::Value = serde_json::from_str(&content).unwrap();
+        assert_eq!(
+            payload["settingsConfig"]["models"],
+            serde_json::json!([{ "id": "a" }, { "id": "b" }])
+        );
+        assert!(handle_model_fetch_msg(&mut app, response(8)).is_none());
     }
 
     #[test]

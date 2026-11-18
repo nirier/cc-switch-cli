@@ -127,6 +127,7 @@ pub enum Action {
     ProviderQuotaRefresh {
         id: String,
     },
+    PiDiscoverModels(crate::cli::pi_model_discovery::DiscoveryRequest),
     ProviderModelFetch {
         base_url: String,
         is_full_url: bool,

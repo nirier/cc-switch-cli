@@ -7,7 +7,7 @@ use crate::proxy::providers::get_claude_api_format;
 use crate::services::provider::ProviderSortUpdate;
 use crate::services::ProviderService;
 
-use super::super::app::{ConfirmAction, ConfirmOverlay, Overlay, ToastKind};
+use super::super::app::{ConfirmAction, ConfirmOverlay, LoadingKind, Overlay, ToastKind};
 use super::super::data::load_state;
 #[cfg(test)]
 use super::super::data::UiData;
@@ -583,6 +583,38 @@ pub(super) fn model_fetch(
             *error = Some(texts::tui_model_fetch_error_hint(&err.to_string()));
         }
     }
+    Ok(())
+}
+
+pub(super) fn discover_pi_models(
+    ctx: &mut RuntimeActionContext<'_>,
+    request: crate::cli::pi_model_discovery::DiscoveryRequest,
+) -> Result<(), AppError> {
+    let Some(tx) = ctx.model_fetch_req_tx else {
+        ctx.app.push_toast(
+            texts::tui_toast_model_fetch_worker_disabled(),
+            ToastKind::Warning,
+        );
+        return Ok(());
+    };
+    let request_id = next_model_fetch_request_id();
+    if let Err(err) = tx.send(ModelFetchReq::DiscoverPi {
+        request_id,
+        request,
+    }) {
+        ctx.app.push_toast(
+            texts::tui_model_fetch_error_hint(&err.to_string()),
+            ToastKind::Error,
+        );
+        return Ok(());
+    }
+
+    ctx.app.overlay = Overlay::Loading {
+        kind: LoadingKind::PiModelDiscovery(request_id),
+        title: crate::t!("Discover models", "探测模型").to_string(),
+        message: crate::t!("Fetching the provider’s model list…", "正在获取供应商的模型列表…")
+            .to_string(),
+    };
     Ok(())
 }
 

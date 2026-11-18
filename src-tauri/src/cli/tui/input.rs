@@ -236,6 +236,10 @@ impl<S: EventSource> InputReader<S> {
         }
     }
 
+    pub(super) fn has_pending_input(&mut self) -> io::Result<bool> {
+        self.source.poll(Duration::ZERO)
+    }
+
     /// Waits for input and returns one ordered, reduced batch.
     ///
     /// The wait is shortened to an active gesture's quiet deadline so the
@@ -360,6 +364,24 @@ mod tests {
             } => (direction, steps, gesture),
             other => panic!("expected wheel input, got {other:?}"),
         }
+    }
+
+    #[test]
+    fn pi_model_discovery_checks_for_input_after_an_empty_reduced_batch() -> io::Result<()> {
+        let source = FakeEventSource::from_events([
+            Event::FocusGained,
+            Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        ]);
+        let mut reader = InputReader::with_limits(source, 1, Duration::from_secs(1));
+
+        assert!(reader.read_batch(Duration::ZERO)?.is_empty());
+        assert!(reader.has_pending_input()?);
+        assert!(matches!(
+            reader.read_batch(Duration::ZERO)?.as_slice(),
+            [UiInput::Key(key)] if key.code == KeyCode::Esc
+        ));
+        assert!(!reader.has_pending_input()?);
+        Ok(())
     }
 
     #[test]

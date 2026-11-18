@@ -805,6 +805,10 @@ pub(crate) struct UpdateSystem {
 }
 
 pub(crate) enum ModelFetchReq {
+    DiscoverPi {
+        request_id: u64,
+        request: crate::cli::pi_model_discovery::DiscoveryRequest,
+    },
     Fetch {
         request_id: u64,
         base_url: String,
@@ -821,6 +825,10 @@ pub(crate) enum ModelFetchReq {
 }
 
 pub(crate) enum ModelFetchMsg {
+    PiDiscoveryFinished {
+        request_id: u64,
+        result: Result<crate::cli::pi_model_discovery::DiscoveredModels, String>,
+    },
     Finished {
         request_id: u64,
         field: ProviderAddField,

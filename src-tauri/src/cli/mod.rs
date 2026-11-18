@@ -12,6 +12,7 @@ pub(crate) mod failover_policy;
 pub use crate::i18n;
 pub mod interactive;
 pub(crate) mod openclaw_form_normalization;
+pub(crate) mod pi_model_discovery;
 pub(crate) mod provider_quota;
 pub(crate) mod proxy_settings;
 pub mod terminal;

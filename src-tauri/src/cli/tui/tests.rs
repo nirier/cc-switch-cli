@@ -21,6 +21,38 @@ use crate::{AppError, AppType};
 use runtime_systems::{ManagedSessionOutcome, ProxyMsg};
 
 #[test]
+fn pi_model_discovery_cancellation_precedes_a_ready_result() {
+    let mut app = App::new(Some(AppType::Pi));
+    app.form = Some(form::FormState::ProviderAdd(ProviderAddFormState::new(
+        AppType::Pi,
+    )));
+    app.overlay = Overlay::Loading {
+        kind: LoadingKind::PiModelDiscovery(1),
+        title: String::new(),
+        message: String::new(),
+    };
+    let (tx, rx) = mpsc::channel();
+    tx.send(runtime_systems::ModelFetchMsg::PiDiscoveryFinished {
+        request_id: 1,
+        result: Ok(crate::cli::pi_model_discovery::DiscoveredModels {
+            base_url: "https://example.com/v1".parse().unwrap(),
+            models: vec![json!({ "id": "a" })],
+        }),
+    })
+    .ok()
+    .expect("queue the finished request");
+    let mut frame = FrameScheduler::new();
+    assert!(drain_model_fetch_results(&mut app, &rx, true, &mut frame).is_none());
+    app.on_key(
+        KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE),
+        &UiData::default(),
+    );
+    assert!(matches!(app.overlay, Overlay::None));
+    assert!(drain_model_fetch_results(&mut app, &rx, false, &mut frame).is_none());
+    assert!(app.form.is_some());
+}
+
+#[test]
 fn codex_history_action_is_forwarded_to_the_dedicated_worker() {
     let mut app = App::new(Some(AppType::Codex));
     let (tx, rx) = mpsc::channel();

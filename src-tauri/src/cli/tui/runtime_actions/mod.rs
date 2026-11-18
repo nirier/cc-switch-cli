@@ -928,6 +928,7 @@ pub(crate) fn handle_action(
             providers::move_failover_queue(&mut ctx, id, direction)
         }
         Action::ProviderQuotaRefresh { .. } => Ok(()),
+        Action::PiDiscoverModels(request) => providers::discover_pi_models(&mut ctx, request),
         Action::ProviderModelFetch {
             base_url,
             is_full_url,

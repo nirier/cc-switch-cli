@@ -4630,6 +4630,7 @@ pub enum LoadingKind {
     WebDav,
     S3,
     UpdateCheck,
+    PiModelDiscovery(u64),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

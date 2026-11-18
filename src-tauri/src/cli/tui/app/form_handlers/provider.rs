@@ -46,6 +46,19 @@ impl App {
     }
 
     pub(super) fn build_provider_form_save_action(&mut self, data: &UiData) -> Action {
+        let Some(FormState::ProviderAdd(provider)) = self.form.as_ref() else {
+            return Action::None;
+        };
+        let pi_discovery = if provider.app_type == AppType::Pi
+            && !provider.mode.is_edit()
+            && provider.copy_source_id.is_none()
+        {
+            let payload = provider.to_provider_json_value();
+            crate::cli::pi_model_discovery::target(&payload["settingsConfig"])
+                .map(Action::PiDiscoverModels)
+        } else {
+            None
+        };
         let validation = {
             let Some(FormState::ProviderAdd(provider)) = self.form.as_mut() else {
                 return Action::None;
@@ -104,6 +117,7 @@ impl App {
                 ))
             } else if matches!(provider.app_type, crate::app_config::AppType::Pi)
                 && !provider.mode.is_edit()
+                && pi_discovery.is_none()
                 && !provider.openclaw_models.iter().any(|model| {
                     model
                         .get("id")
@@ -203,6 +217,9 @@ impl App {
             self.push_toast(texts::tui_user_agent_invalid_hint(), ToastKind::Warning);
         }
 
+        if let Some(action) = pi_discovery {
+            return action;
+        }
         let Some(FormState::ProviderAdd(provider)) = self.form.as_ref() else {
             return Action::None;
         };

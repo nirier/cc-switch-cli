@@ -608,18 +608,26 @@ fn model_fetch_worker_loop(rx: mpsc::Receiver<ModelFetchReq>, tx: mpsc::Sender<M
         Err(e) => {
             let err = e.to_string();
             while let Ok(req) = rx.recv() {
-                let ModelFetchReq::Fetch {
-                    request_id,
-                    field,
-                    claude_idx,
-                    ..
-                } = req;
-                let _ = tx.send(ModelFetchMsg::Finished {
-                    request_id,
-                    field,
-                    claude_idx,
-                    result: Err(err.clone()),
-                });
+                let msg = match req {
+                    ModelFetchReq::Fetch {
+                        request_id,
+                        field,
+                        claude_idx,
+                        ..
+                    } => ModelFetchMsg::Finished {
+                        request_id,
+                        field,
+                        claude_idx,
+                        result: Err(err.clone()),
+                    },
+                    ModelFetchReq::DiscoverPi { request_id, .. } => {
+                        ModelFetchMsg::PiDiscoveryFinished {
+                            request_id,
+                            result: Err(err.clone()),
+                        }
+                    }
+                };
+                let _ = tx.send(msg);
             }
             return;
         }
@@ -638,7 +646,18 @@ fn model_fetch_worker_loop(rx: mpsc::Receiver<ModelFetchReq>, tx: mpsc::Sender<M
             codex_oauth_account_id,
             field,
             claude_idx,
-        } = req;
+        } = req
+        else {
+            if let ModelFetchReq::DiscoverPi {
+                request_id,
+                request,
+            } = req
+            {
+                let result = rt.block_on(crate::cli::pi_model_discovery::discover(request));
+                let _ = tx.send(ModelFetchMsg::PiDiscoveryFinished { request_id, result });
+            }
+            continue;
+        };
         let result = if codex_oauth {
             rt.block_on(async {
                 crate::services::CodexOAuthService::get_models(codex_oauth_account_id.as_deref())

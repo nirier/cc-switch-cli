@@ -904,8 +904,8 @@ fn provider_field_help(app_type: AppType, field: ProviderAddField) -> HelpConten
         ProviderAddField::OpenClawModels => HelpContent::new(
             texts::tui_label_openclaw_models(),
             help_lines(
-                "编辑 OpenClaw/Pi 模型列表。Pi 表单中可按 f 从原生端点拉取模型。",
-                "Edits OpenClaw/Pi model entries. In a Pi form, press f to fetch from the native endpoint.",
+                "编辑模型列表。新增 Pi 的 OpenAI 兼容供应商时，填入地址和字面 API Key，留空模型列表并保存即可探测所有模型。Pi 表单中也可按 f 手动选模型。",
+                "Edit the model list. For a new OpenAI-compatible Pi provider, enter the URL and literal API key and save with an empty model list to discover all models. Press f in the Pi form to select a model manually.",
             ),
         ),
         ProviderAddField::OpenCodeModelContextLimit => HelpContent::new(

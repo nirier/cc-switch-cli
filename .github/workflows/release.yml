@@ -10,6 +10,7 @@ permissions:
 
 env:
   RUST_VERSION: 1.91.1
+  PI_VERIFICATION_RELEASE: ${{ github.repository == 'nirier/cc-switch-cli' && contains(github.ref_name, '-pi.') }}
 
 concurrency:
   group: release-${{ github.ref_name }}
@@ -32,6 +33,7 @@ jobs:
         uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ env.RUST_VERSION }}
+          components: rustfmt
 
       - name: Setup Rust cache
         uses: Swatinem/rust-cache@v2
@@ -39,9 +41,19 @@ jobs:
           workspaces: src-tauri
           key: release-benchmark-gate
 
+      - name: Check formatting
+        if: env.PI_VERIFICATION_RELEASE == 'true'
+        working-directory: src-tauri
+        run: cargo fmt --check
+
       - name: Build release binary
         working-directory: src-tauri
         run: cargo build --release
+
+      - name: Verify Pi model discovery
+        if: env.PI_VERIFICATION_RELEASE == 'true'
+        working-directory: src-tauri
+        run: cargo test --release --lib pi_model_discovery
 
       - name: Run blocking benchmarks
         run: |
@@ -226,6 +238,7 @@ jobs:
           ls -R artifacts/
 
       - name: Install minisign
+        if: env.PI_VERIFICATION_RELEASE != 'true'
         shell: bash
         run: |
           set -euxo pipefail
@@ -319,13 +332,15 @@ jobs:
               release-assets/cc-switch-cli-linux-arm64.tar.gz
           fi
 
-          # Include install script
-          cp install.sh release-assets/install.sh
+          if [ "${PI_VERIFICATION_RELEASE}" != 'true' ]; then
+            cp install.sh release-assets/install.sh
+          fi
 
           echo "=== Release assets ==="
           ls -lh release-assets/
 
       - name: Sign updater assets and generate latest.json
+        if: env.PI_VERIFICATION_RELEASE != 'true'
         env:
           CC_SWITCH_MINISIGN_SECRET_KEY: ${{ secrets.CC_SWITCH_MINISIGN_SECRET_KEY }}
         run: |
@@ -364,11 +379,20 @@ jobs:
 
           rm -f release-assets/*.minisig
 
-          (
-            cd release-assets
-            rm -f checksums.txt
-            sha256sum * > checksums.txt
-          )
+      - name: Verify packaged Pi provider discovery
+        if: env.PI_VERIFICATION_RELEASE == 'true'
+        run: |
+          binary_dir="$(mktemp -d)"
+          tar -xzf release-assets/cc-switch-cli-linux-x64.tar.gz -C "$binary_dir"
+          chmod +x "$binary_dir/cc-switch"
+          "$binary_dir/cc-switch" --version
+          python3 scripts/smoke_pi_model_discovery.py "$binary_dir/cc-switch"
+
+      - name: Generate checksums
+        working-directory: release-assets
+        run: |
+          rm -f checksums.txt
+          sha256sum * > checksums.txt
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
@@ -376,7 +400,7 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: CC Switch CLI ${{ github.ref_name }}
           draft: false
-          prerelease: false
+          prerelease: ${{ env.PI_VERIFICATION_RELEASE == 'true' }}
           generate_release_notes: true
           body_path: docs/releases/${{ github.ref_name }}.md
           files: release-assets/*

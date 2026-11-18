@@ -16211,6 +16211,24 @@ mod tests {
     }
 
     #[test]
+    fn pi_model_discovery_starts_on_save_without_manual_models() {
+        let mut app = App::new(Some(AppType::Pi));
+        app.route = Route::Providers;
+        app.focus = Focus::Content;
+        let mut form = ProviderAddFormState::new(AppType::Pi);
+        form.id.set("test-pi".to_string());
+        form.name.set("Test Pi".to_string());
+        form.opencode_base_url.set("https://example.com/v1".to_string());
+        form.opencode_api_key.set("test-key".to_string());
+        app.form = Some(FormState::ProviderAdd(form));
+
+        assert!(matches!(
+            app.on_key(ctrl(KeyCode::Char('s')), &UiData::default()),
+            Action::PiDiscoverModels(_)
+        ));
+    }
+
+    #[test]
     fn pi_provider_edit_submit_carries_the_opened_native_snapshot() {
         let mut app = App::new(Some(AppType::Pi));
         app.route = Route::Providers;

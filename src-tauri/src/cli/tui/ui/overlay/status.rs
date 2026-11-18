@@ -20,7 +20,9 @@ pub(super) fn render_loading_overlay(
     let full_title = format!("{spinner} {title}");
     let shortcuts = match kind {
         LoadingKind::SkillOperation => Vec::new(),
-        LoadingKind::UpdateCheck => vec![("Esc", texts::tui_key_cancel())],
+        LoadingKind::UpdateCheck | LoadingKind::PiModelDiscovery(_) => {
+            vec![("Esc", texts::tui_key_cancel())]
+        }
         _ => vec![("Esc", texts::tui_key_close())],
     };
 

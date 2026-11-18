@@ -14,7 +14,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 use std::sync::{LazyLock, Mutex, MutexGuard};
 
-const MAX_PI_FILE_BYTES: u64 = 1024 * 1024;
+pub(crate) const MAX_PI_FILE_BYTES: u64 = 1024 * 1024;
 const MISSING_MODELS_REVISION: &str = "missing";
 static MODELS_FILE_LOCK: LazyLock<Mutex<()>> = LazyLock::new(|| Mutex::new(()));
 #[cfg(test)]
@@ -404,7 +404,15 @@ fn write_models_document(
 ) -> Result<(), AppError> {
     let mut bytes =
         serde_json::to_vec_pretty(document).map_err(|source| AppError::JsonSerialize { source })?;
+    if bytes.len() as u64 >= MAX_PI_FILE_BYTES {
+        bytes = serde_json::to_vec(document).map_err(|source| AppError::JsonSerialize { source })?;
+    }
     bytes.push(b'\n');
+    if bytes.len() as u64 > MAX_PI_FILE_BYTES {
+        return Err(AppError::Config(format!(
+            "Pi models file would exceed {MAX_PI_FILE_BYTES} bytes"
+        )));
+    }
     ensure_private_models_parent(path)?;
     ensure_models_revision(path, expected_revision)?;
     atomic_write_private(path, &bytes)
@@ -617,6 +625,26 @@ mod tests {
 
         assert_eq!(file_mode, 0o600);
         assert_eq!(directory_mode, 0o700);
+    }
+
+    #[test]
+    #[serial]
+    fn pi_model_discovery_size_guard_can_rewrite_a_readable_compact_file() {
+        let _agent = test_support::TestAgentDir::new();
+        let path = get_pi_models_path().unwrap();
+        ensure_private_models_parent(&path).unwrap();
+        let models = vec![serde_json::json!({ "id": "fixture" }); 26000];
+        let document = serde_json::json!({
+            "providers": { "keep": { "models": models }, "remove": {} }
+        });
+        let compact = serde_json::to_vec(&document).unwrap();
+        assert!((compact.len() as u64) < MAX_PI_FILE_BYTES);
+        assert!((serde_json::to_vec_pretty(&document).unwrap().len() as u64) > MAX_PI_FILE_BYTES);
+        fs::write(&path, compact).unwrap();
+
+        assert!(remove_pi_provider("remove").unwrap().is_some());
+        assert!(read_pi_native_provider("keep").unwrap().is_some());
+        assert!(read_pi_native_provider("remove").unwrap().is_none());
     }
 
     #[test]

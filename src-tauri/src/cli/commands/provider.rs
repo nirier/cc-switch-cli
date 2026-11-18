@@ -693,13 +693,13 @@ pub enum ProviderCommand {
         /// Explicit provider ID (default: generated from the name)
         #[arg(long)]
         id: Option<String>,
-        /// API endpoint base URL (Claude/Codex/Gemini field mode)
+        /// API endpoint base URL (Claude/Codex/Gemini/Pi field mode)
         #[arg(long, conflicts_with_all = ["config", "config_file"])]
         base_url: Option<String>,
-        /// API key or token (Claude/Codex/Gemini field mode)
+        /// API key or token (Claude/Codex/Gemini/Pi field mode)
         #[arg(long, conflicts_with_all = ["config", "config_file"])]
         api_key: Option<String>,
-        /// Default model (Claude/Codex/Gemini field mode, optional)
+        /// Model override (Pi discovers all models from OpenAI-compatible providers when omitted)
         #[arg(long, conflicts_with_all = ["config", "config_file"])]
         model: Option<String>,
         /// Claude Haiku role model ([1M] is ignored because Haiku does not support it)
@@ -1433,8 +1433,6 @@ fn build_add_settings_config(
                     "Pi --base-url must be an absolute HTTP(S) URL".to_string(),
                 ));
             }
-            let model =
-                non_empty(args.model.clone()).ok_or_else(|| add_missing_field_error("--model"))?;
             let api = non_empty(args.api_format.clone())
                 .unwrap_or_else(|| "openai-completions".to_string());
             if !crate::openclaw_config::OPENCLAW_API_PROTOCOLS.contains(&api.as_str()) {
@@ -1447,10 +1445,14 @@ fn build_add_settings_config(
                 "name": provider_name,
                 "baseUrl": base_url,
                 "api": api,
-                "models": [{ "id": model }],
             });
             if let Some(api_key) = non_empty(args.api_key.clone()) {
                 settings["apiKey"] = serde_json::json!(api_key);
+            }
+            if let Some(model) = non_empty(args.model.clone()) {
+                settings["models"] = serde_json::json!([{ "id": model }]);
+            } else if crate::cli::pi_model_discovery::target(&settings).is_none() {
+                return Err(add_missing_field_error("--model"));
             }
             Ok(settings)
         }
@@ -1685,6 +1687,19 @@ fn add_provider(app_type: AppType, args: AddProviderArgs) -> Result<(), AppError
         set_provider_common_config_meta(&mut provider, args.common_config);
     } else if args.common_config {
         println!("{}", warning(&common_config_unavailable_message(&app_type)));
+    }
+
+    if matches!(app_type, AppType::Pi) && template.is_custom() && raw_config.is_none() {
+        if let Some(request) = crate::cli::pi_model_discovery::target(&provider.settings_config) {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| AppError::Message(error.to_string()))?;
+            runtime
+                .block_on(crate::cli::pi_model_discovery::discover(request))
+                .map_err(AppError::Message)?
+                .apply(&mut provider.settings_config);
+        }
     }
 
     // 4. 显示摘要并写入

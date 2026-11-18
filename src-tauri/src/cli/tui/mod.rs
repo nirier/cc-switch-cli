@@ -2193,6 +2193,31 @@ fn drain_initial_app_data_messages(
     Ok(loaded)
 }
 
+fn drain_model_fetch_results(
+    app: &mut App,
+    results: &mpsc::Receiver<runtime_systems::ModelFetchMsg>,
+    input_pending: bool,
+    frame_scheduler: &mut FrameScheduler,
+) -> Option<Action> {
+    // A queued Esc must still see the discovery overlay before a result can save the provider.
+    if input_pending
+        && matches!(
+            app.overlay,
+            Overlay::Loading {
+                kind: app::LoadingKind::PiModelDiscovery(_),
+                ..
+            }
+        )
+    {
+        return None;
+    }
+
+    results.try_iter().find_map(|msg| {
+        frame_scheduler.mark_dirty();
+        handle_model_fetch_msg(app, msg)
+    })
+}
+
 fn cache_invalidation_for_action(action: &Action) -> CacheInvalidation {
     match action {
         Action::None
@@ -2216,6 +2241,7 @@ fn cache_invalidation_for_action(action: &Action) -> CacheInvalidation {
         | Action::ProviderStreamCheck { .. }
         | Action::ProviderQuotaRefresh { .. }
         | Action::ProviderModelFetch { .. }
+        | Action::PiDiscoverModels(_)
         | Action::UsageCustomRange { .. }
         | Action::UsageRefresh
         | Action::UsageRebuildCodex
@@ -3658,13 +3684,6 @@ pub fn run(app_override: Option<AppType>) -> Result<(), AppError> {
             }
         }
 
-        if let Some(mf) = model_fetch.as_ref() {
-            while let Ok(msg) = mf.result_rx.try_recv() {
-                frame_scheduler.mark_dirty();
-                handle_model_fetch_msg(&mut app, msg);
-            }
-        }
-
         if let Some(auth) = managed_auth.as_ref() {
             while let Ok(msg) = auth.result_rx.try_recv() {
                 frame_scheduler.mark_dirty();
@@ -3702,121 +3721,92 @@ pub fn run(app_override: Option<AppType>) -> Result<(), AppError> {
             // terminal writes to one per frame interval.
             frame_scheduler.mark_dirty();
         }
-        for input in inputs {
-            match input {
-                input::UiInput::Key(key) => {
-                    let key = normalize_key_event(key);
-                    let before_app_type = app.app_type.clone();
-                    let action = app.on_key(key, &data);
-                    let action = queue_codex_history_action(
-                        &mut app,
-                        codex_history.as_ref().map(|system| &system.req_tx),
-                        &mut codex_history_save,
-                        action,
-                    );
-                    let action_result = handle_tui_action(
-                        &mut terminal,
-                        &mut app,
-                        &mut data,
-                        &mut data_cache,
-                        app_data.as_ref().map(|s| &s.req_tx),
-                        speedtest.as_ref().map(|s| &s.req_tx),
-                        stream_check.as_ref().map(|s| &s.req_tx),
-                        skills.as_ref().map(|s| &s.req_tx),
-                        proxy_system.as_ref().map(|s| &s.req_tx),
-                        &mut proxy_loading,
-                        local_env.as_ref().map(|s| &s.req_tx),
-                        sessions.as_ref().map(|s| &s.req_tx),
-                        webdav.as_ref().map(|s| &s.req_tx),
-                        &mut webdav_loading,
-                        update_system.as_ref().map(|s| &s.req_tx),
-                        &mut update_check,
-                        model_fetch.as_ref().map(|s| &s.req_tx),
-                        managed_auth.as_ref().map(|s| &s.req_tx),
-                        quota.as_ref().map(|s| &s.req_tx),
-                        usage_pricing.as_ref().map(|s| &s.req_tx),
-                        session_usage
-                            .as_ref()
-                            .map(|s| (&s.req_tx, &mut session_usage_sync)),
-                        action,
-                    );
-                    let action_succeeded = action_result.is_ok();
-                    if let Err(err) = action_result {
-                        if matches!(
-                            &err,
-                            AppError::Localized { key, .. } if *key == "tui_terminal_error"
-                        ) {
-                            return Err(err);
-                        }
-                        app.push_toast(err.to_string(), ToastKind::Error);
-                    }
-                    queue_proxy_snapshot_refresh_after_app_switch(
-                        &mut proxy_snapshot_refresh,
-                        proxy_system.as_ref().map(|s| &s.req_tx),
-                        &before_app_type,
-                        &app.app_type,
-                        action_succeeded,
-                    );
-                }
-                input::UiInput::Wheel {
-                    direction,
-                    steps,
-                    gesture,
-                } => {
-                    let before_app_type = app.app_type.clone();
-                    let action = app.on_wheel(direction, steps, gesture, &data);
-                    let action = queue_codex_history_action(
-                        &mut app,
-                        codex_history.as_ref().map(|system| &system.req_tx),
-                        &mut codex_history_save,
-                        action,
-                    );
-                    let action_result = handle_tui_action(
-                        &mut terminal,
-                        &mut app,
-                        &mut data,
-                        &mut data_cache,
-                        app_data.as_ref().map(|s| &s.req_tx),
-                        speedtest.as_ref().map(|s| &s.req_tx),
-                        stream_check.as_ref().map(|s| &s.req_tx),
-                        skills.as_ref().map(|s| &s.req_tx),
-                        proxy_system.as_ref().map(|s| &s.req_tx),
-                        &mut proxy_loading,
-                        local_env.as_ref().map(|s| &s.req_tx),
-                        sessions.as_ref().map(|s| &s.req_tx),
-                        webdav.as_ref().map(|s| &s.req_tx),
-                        &mut webdav_loading,
-                        update_system.as_ref().map(|s| &s.req_tx),
-                        &mut update_check,
-                        model_fetch.as_ref().map(|s| &s.req_tx),
-                        managed_auth.as_ref().map(|s| &s.req_tx),
-                        quota.as_ref().map(|s| &s.req_tx),
-                        usage_pricing.as_ref().map(|s| &s.req_tx),
-                        session_usage
-                            .as_ref()
-                            .map(|s| (&s.req_tx, &mut session_usage_sync)),
-                        action,
-                    );
-                    let action_succeeded = action_result.is_ok();
-                    if let Err(err) = action_result {
-                        if matches!(
-                            &err,
-                            AppError::Localized { key, .. } if *key == "tui_terminal_error"
-                        ) {
-                            return Err(err);
-                        }
-                        app.push_toast(err.to_string(), ToastKind::Error);
-                    }
-                    queue_proxy_snapshot_refresh_after_app_switch(
-                        &mut proxy_snapshot_refresh,
-                        proxy_system.as_ref().map(|s| &s.req_tx),
-                        &before_app_type,
-                        &app.app_type,
-                        action_succeeded,
-                    );
-                }
-                input::UiInput::Resize { .. } => {}
+        let pi_discovering = matches!(
+            app.overlay,
+            Overlay::Loading {
+                kind: app::LoadingKind::PiModelDiscovery(_),
+                ..
             }
+        );
+        let input_pending = !inputs.is_empty()
+            || (pi_discovering
+                && input_reader
+                    .has_pending_input()
+                    .map_err(|error| AppError::Message(error.to_string()))?);
+        let mut completed_pi_save = model_fetch.as_ref().and_then(|worker| {
+            drain_model_fetch_results(
+                &mut app,
+                &worker.result_rx,
+                input_pending,
+                &mut frame_scheduler,
+            )
+        });
+        let mut inputs = inputs.into_iter();
+        loop {
+            let before_app_type = app.app_type.clone();
+            let action = if let Some(action) = completed_pi_save.take() {
+                action
+            } else {
+                match inputs.next() {
+                    Some(input::UiInput::Key(key)) => app.on_key(normalize_key_event(key), &data),
+                    Some(input::UiInput::Wheel {
+                        direction,
+                        steps,
+                        gesture,
+                    }) => app.on_wheel(direction, steps, gesture, &data),
+                    Some(input::UiInput::Resize { .. }) => continue,
+                    None => break,
+                }
+            };
+            let action = queue_codex_history_action(
+                &mut app,
+                codex_history.as_ref().map(|system| &system.req_tx),
+                &mut codex_history_save,
+                action,
+            );
+            let action_result = handle_tui_action(
+                &mut terminal,
+                &mut app,
+                &mut data,
+                &mut data_cache,
+                app_data.as_ref().map(|s| &s.req_tx),
+                speedtest.as_ref().map(|s| &s.req_tx),
+                stream_check.as_ref().map(|s| &s.req_tx),
+                skills.as_ref().map(|s| &s.req_tx),
+                proxy_system.as_ref().map(|s| &s.req_tx),
+                &mut proxy_loading,
+                local_env.as_ref().map(|s| &s.req_tx),
+                sessions.as_ref().map(|s| &s.req_tx),
+                webdav.as_ref().map(|s| &s.req_tx),
+                &mut webdav_loading,
+                update_system.as_ref().map(|s| &s.req_tx),
+                &mut update_check,
+                model_fetch.as_ref().map(|s| &s.req_tx),
+                managed_auth.as_ref().map(|s| &s.req_tx),
+                quota.as_ref().map(|s| &s.req_tx),
+                usage_pricing.as_ref().map(|s| &s.req_tx),
+                session_usage
+                    .as_ref()
+                    .map(|s| (&s.req_tx, &mut session_usage_sync)),
+                action,
+            );
+            let action_succeeded = action_result.is_ok();
+            if let Err(err) = action_result {
+                if matches!(
+                    &err,
+                    AppError::Localized { key, .. } if *key == "tui_terminal_error"
+                ) {
+                    return Err(err);
+                }
+                app.push_toast(err.to_string(), ToastKind::Error);
+            }
+            queue_proxy_snapshot_refresh_after_app_switch(
+                &mut proxy_snapshot_refresh,
+                proxy_system.as_ref().map(|s| &s.req_tx),
+                &before_app_type,
+                &app.app_type,
+                action_succeeded,
+            );
             if app.should_quit {
                 break;
             }
